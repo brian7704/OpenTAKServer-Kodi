@@ -16,7 +16,6 @@ provider-name="OpenTAKServer">
   <license>GPL-3.0-only</license>
   <assets>
     <icon>resources/images/ots-logo.png</icon>
-    <fanart>resources/images/ots-logo.png</fanart>
   </assets>
 </extension>
 </addon>
