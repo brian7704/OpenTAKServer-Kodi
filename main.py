@@ -25,28 +25,39 @@ FANART_DIR = os.path.join(ADDON_PATH, 'resources', 'images', 'fanart')
 __addon__ = xbmcaddon.Addon(id='plugin.video.opentakserver')
 __addondir__ = xbmcvfs.translatePath( __addon__.getAddonInfo('profile'))
 
-s = requests.session()
+#s = requests.session()
 csrf_token = None
 
-def get(url):
-    f = xbmcvfs.File(os.path.join(__addondir__, "cookies.bin"), 'rb')
-    s.cookies = pickle.loads(f.readBytes())
-    f.close()
 
+def get_auth_token_from_file():
+    f = xbmcvfs.File(os.path.join(__addondir__, "auth_token"), 'r')
+    auth_token = f.read()
+    f.close()
+    return auth_token
+
+
+def get(url):
+    auth_token = get_auth_token_from_file()
+
+    r = requests.get(url, params={'auth_token': auth_token}, verify=False)
+    print(r.text)
     # TODO: Certificates
-    return s.get(url, verify=False)
+    return r
+
 
 def login():
-    r = s.post(xbmcplugin.getSetting(HANDLE, "server_url") + "/api/login",
+    r = requests.post(xbmcplugin.getSetting(HANDLE, "server_url") + "/api/login?include_auth_token",
                json={'username': xbmcplugin.getSetting(HANDLE, "username"),
                      'password': xbmcplugin.getSetting(HANDLE, "password")})
     if r.status_code == 200:
-        global csrf_token
-        csrf_token = r.json()['response']['csrf_token']
-        xbmc.log(csrf_token, xbmc.LOGINFO)
-        xbmc.log(str(s.cookies), xbmc.LOGINFO)
-        f = xbmcvfs.File(os.path.join(__addondir__, 'cookies.bin'), 'wb')
-        f.write(pickle.dumps(s.cookies))
+        #global csrf_token
+        auth_token = r.json()['response']['user']['authentication_token']
+        xbmc.log(f"login() {auth_token}", xbmc.LOGINFO)
+        #csrf_token = r.json()['response']['csrf_token']
+        #xbmc.log(csrf_token, xbmc.LOGINFO)
+        #xbmc.log(str(s.cookies), xbmc.LOGINFO)
+        f = xbmcvfs.File(os.path.join(__addondir__, 'auth_token'), 'w')
+        f.write(auth_token)
         f.close()
     else:
         dialog = xbmcgui.Dialog()
@@ -79,7 +90,6 @@ def list_videos():
     xbmcplugin.endOfDirectory(HANDLE)
 
 
-
 def router(paramstring):
     """
     Router function that calls other functions
@@ -94,6 +104,7 @@ def router(paramstring):
     xbmc.log("paramstring " + str(paramstring), xbmc.LOGINFO)
     xbmcplugin.setPluginCategory(HANDLE, "OpenTAKServer")
     xbmcplugin.setContent(HANDLE, 'videos')
+    auth_token = get_auth_token_from_file()
 
     window = xbmcgui.Window(10000)
 
@@ -120,13 +131,12 @@ def router(paramstring):
             list_item = xbmcgui.ListItem(label=stream['path'])
 
             # The random UUID prevents Kodi from pulling the thumbnail from cache. The server ignores it
-            thumbnail = xbmcplugin.getSetting(HANDLE,"server_url") + '/api/videos/thumbnail?path={}&random={}|Cookie=Cookie: '.format(stream['path'], str(uuid.uuid4()))
-            for cookie in s.cookies:
-                thumbnail += cookie.name + "=" + cookie.value + "; "
+            thumbnail = xbmcplugin.getSetting(HANDLE, "server_url") + '/api/videos/thumbnail?path={}&random={}&auth_token={} '.format(stream['path'], str(uuid.uuid4()), auth_token)
             list_item.setArt({'thumb': thumbnail, 'fanart': thumbnail})
 
-            link = stream['rtsp_link'].split("//", 1)
-            xbmcplugin.addDirectoryItem(HANDLE, "rtsp://{}:{}@{}".format(xbmcplugin.getSetting(HANDLE, "username"), xbmcplugin.getSetting(HANDLE, "password"), link[-1]), list_item, False)
+            #link = stream['rtsp_link'].split("//", 1)
+            #xbmcplugin.addDirectoryItem(HANDLE, "rtsp://{}:{}@{}".format(xbmcplugin.getSetting(HANDLE, "username"), xbmcplugin.getSetting(HANDLE, "password"), link[-1]), list_item, False)
+            xbmcplugin.addDirectoryItem(HANDLE, f"{stream['hls_link']}index.m3u8?jwt={auth_token}", list_item, False)
 
         if page < streams['total_pages']:
             list_item = xbmcgui.ListItem(label="Next Page")
@@ -146,12 +156,10 @@ def router(paramstring):
 
         server_url = xbmcplugin.getSetting(HANDLE, "server_url")
         recordings = get("{}/api/videos/recordings?page={}".format(server_url, page))
+        xbmc.log(recordings.text, xbmc.LOGINFO)
         for recording in recordings.json()['results']:
-            url = "{}/api/videos/recording?id={}|Cookie=Cookie: ".format(server_url, recording['id'])
-            thumbnail = '{}/api/videos/thumbnail?path={}&recording={}&random={}|Cookie=Cookie: '.format(server_url, recording['path'], recording['filename'], str(uuid.uuid4()))
-            for cookie in s.cookies:
-                url += cookie.name + "=" + cookie.value + "; "
-                thumbnail += cookie.name + "=" + cookie.value + "; "
+            url = "{}/api/videos/recording?id={}&auth_token={}|Cookie=Cookie: ".format(server_url, recording['id'], auth_token)
+            thumbnail = '{}/api/videos/thumbnail?path={}&recording={}&random={}&auth_token={}'.format(server_url, recording['path'], recording['filename'], str(uuid.uuid4()), auth_token)
             list_item = xbmcgui.ListItem(label=recording['path'] + " - " + recording['start_time'])
             list_item.setArt({'thumb': thumbnail})
             try:
@@ -162,7 +170,8 @@ def router(paramstring):
             tag = list_item.getVideoInfoTag()
             tag.setDateAdded(start_time.strftime("%Y-%m-%d %H:%M:%S"))
             tag.setPremiered(start_time.strftime("%Y-%m-%d %H:%M:%S"))
-            tag.setDuration(recording['duration'])
+            if recording['duration']:
+                tag.setDuration(recording['duration'])
             xbmcplugin.addDirectoryItem(HANDLE, url, list_item)
 
         if page < recordings.json()['total_pages']:
