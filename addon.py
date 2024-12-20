@@ -37,9 +37,9 @@ def get_auth_token_from_file():
 def get(url):
     auth_token = get_auth_token_from_file()
 
-    r = requests.get(url, params={'auth_token': auth_token}, verify=False)
-    print(r.text)
-    # TODO: Certificates
+    r = requests.get(url, params={'auth_token': auth_token}, verify=bool(xbmcplugin.getSetting(HANDLE, "verify_certificates")))
+    if r.status_code != 200:
+        xbmc.log(f"Failed to get {url}: {r.text}", xbmc.LOGERROR)
     return r
 
 
@@ -67,15 +67,6 @@ def format_url(**kwargs):
     :rtype: str
     """
     return '{}?{}'.format(URL, urlencode(kwargs))
-
-
-def list_videos():
-    """
-    Create the list of playable videos in the Kodi interface.
-    """
-    xbmcplugin.setPluginCategory(HANDLE, "OpenTAKServer")
-    xbmcplugin.setContent(HANDLE, 'videos')
-    xbmcplugin.endOfDirectory(HANDLE)
 
 
 def router(paramstring):
@@ -120,7 +111,7 @@ def router(paramstring):
             thumbnail = xbmcplugin.getSetting(HANDLE, "server_url") + '/api/videos/thumbnail?path={}&random={}&auth_token={} '.format(stream['path'], str(uuid.uuid4()), auth_token)
             list_item.setArt({'thumb': thumbnail, 'fanart': thumbnail})
 
-            xbmcplugin.addDirectoryItem(HANDLE, f"{stream['hls_link']}index.m3u8?jwt={auth_token}", list_item, False)
+            xbmcplugin.addDirectoryItem(HANDLE, f"{stream['rtsp_link']}?jwt={auth_token}", list_item, False)
 
         if page < streams['total_pages']:
             list_item = xbmcgui.ListItem(label="Next Page")
